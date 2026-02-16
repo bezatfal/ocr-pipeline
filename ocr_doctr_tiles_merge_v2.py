@@ -45,12 +45,24 @@ def reading_order(words, y_bucket_px=18):
     return ordered
 
 def main():
+    if len(sys.argv) < 4:
+        print("usage: ocr_doctr_tiles_merge_v2.py <tiles_dir> <out.json> <out.txt> [dedupe_iou]")
+        raise SystemExit(2)
+
     tile_dir = Path(sys.argv[1])
     out_json = Path(sys.argv[2])
     out_txt  = Path(sys.argv[3])
-    page_w   = int(sys.argv[4]) if len(sys.argv) > 4 else None
-    page_h   = int(sys.argv[5]) if len(sys.argv) > 5 else None
-    dedupe_iou = float(sys.argv[6]) if len(sys.argv) > 6 else 0.6
+    dedupe_iou = float(sys.argv[4]) if len(sys.argv) > 4 else 0.6
+
+    # auto-detect page size from first tile
+    from PIL import Image
+    first_tile = next(tile_dir.glob("*.png"), None)
+    if not first_tile:
+        raise RuntimeError("No PNG tiles found")
+
+    with Image.open(first_tile) as im:
+        tile_w, tile_h = im.size
+
 
     out_json.parent.mkdir(parents=True, exist_ok=True)
     out_txt.parent.mkdir(parents=True, exist_ok=True)
@@ -110,7 +122,8 @@ def main():
         "word_count_raw": len(all_words),
         "word_count_kept": len(kept),
         "words": ordered,
-        "page_size": {"w": page_w, "h": page_h} if page_w and page_h else None,
+        "tile_size": {"w": tw, "h": th},
+
     }
 
     out_json.write_text(json.dumps(payload, indent=2), encoding="utf-8")

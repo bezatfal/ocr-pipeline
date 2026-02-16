@@ -1,0 +1,24 @@
+# venv
+.venv/
+
+# outputs / data (generated)
+outputs/
+inbox/
+*.sqlite
+*.db
+*.log
+
+# rendered images / big binaries
+*.png
+*.jpg
+*.jpeg
+*.tif
+*.tiff
+
+# caches
+__pycache__/
+*.pyc
+.cache/
+.cache/doctr/
+.paddlex/
+hf-cache/

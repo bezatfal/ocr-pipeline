@@ -5,6 +5,27 @@ from doctr.models import ocr_predictor
 
 TILE_RE = re.compile(r".*_x(\d+)_y(\d+)_t\d+\.png$", re.IGNORECASE)
 
+def parse_tile_xy(name: str):
+    m = TILE_RE.match(name)
+    if not m:
+        return None
+    return int(m.group(1)), int(m.group(2))
+
+def infer_page_size_from_tiles(tile_names, tile_w: int, tile_h: int):
+    max_x = 0
+    max_y = 0
+    for n in tile_names:
+        xy = parse_tile_xy(n)
+        if not xy:
+            continue
+        x, y = xy
+        max_x = max(max_x, x)
+        max_y = max(max_y, y)
+    if max_x == 0 and max_y == 0:
+        return None
+    return {"w": int(max_x + tile_w), "h": int(max_y + tile_h)}
+
+
 def iou(a, b):
     ax1, ay1, ax2, ay2 = a
     bx1, by1, bx2, by2 = b

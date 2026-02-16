@@ -1,15 +1,22 @@
-import os, re, sys, json
+import re
+import sys
+import json
 from pathlib import Path
+
+from PIL import Image
 from doctr.io import DocumentFile
 from doctr.models import ocr_predictor
 
+# expects tile filenames like: page_0001_x00000_y01229_t0003.png
 TILE_RE = re.compile(r".*_x(\d+)_y(\d+)_t\d+\.png$", re.IGNORECASE)
+
 
 def parse_tile_xy(name: str):
     m = TILE_RE.match(name)
     if not m:
         return None
     return int(m.group(1)), int(m.group(2))
+
 
 def infer_page_size_from_tiles(tile_names, tile_w: int, tile_h: int):
     max_x = 0
@@ -35,9 +42,10 @@ def iou(a, b):
     inter = iw * ih
     if inter <= 0:
         return 0.0
-    a_area = max(0, ax2-ax1) * max(0, ay2-ay1)
-    b_area = max(0, bx2-bx1) * max(0, by2-by1)
+    a_area = max(0, ax2 - ax1) * max(0, ay2 - ay1)
+    b_area = max(0, bx2 - bx1) * max(0, by2 - by1)
     return inter / (a_area + b_area - inter + 1e-9)
+
 
 def reading_order(words, y_bucket_px=18):
     # bucket by y center to form "rows", then sort row by x
@@ -65,6 +73,7 @@ def reading_order(words, y_bucket_px=18):
         ordered.extend(sorted(row["items"], key=lambda w: xc(w)))
     return ordered
 
+
 def main():
     if len(sys.argv) < 4:
         print("usage: ocr_doctr_tiles_merge_v2.py <tiles_dir> <out.json> <out.txt> [dedupe_iou]")
@@ -72,27 +81,33 @@ def main():
 
     tile_dir = Path(sys.argv[1])
     out_json = Path(sys.argv[2])
-    out_txt  = Path(sys.argv[3])
+    out_txt = Path(sys.argv[3])
     dedupe_iou = float(sys.argv[4]) if len(sys.argv) > 4 else 0.6
-
-    # auto-detect page size from first tile
-    from PIL import Image
-    first_tile = next(tile_dir.glob("*.png"), None)
-    if not first_tile:
-        raise RuntimeError("No PNG tiles found")
-
-    with Image.open(first_tile) as im:
-        tile_w, tile_h = im.size
-
 
     out_json.parent.mkdir(parents=True, exist_ok=True)
     out_txt.parent.mkdir(parents=True, exist_ok=True)
 
-    predictor = ocr_predictor(det_arch="db_resnet50", reco_arch="crnn_vgg16_bn", pretrained=True)
+    tile_paths = sorted(tile_dir.glob("*.png"))
+    if not tile_paths:
+        raise RuntimeError(f"No PNG tiles found in: {tile_dir}")
+
+    # detect tile size from first tile
+    with Image.open(tile_paths[0]) as im:
+        tile_w, tile_h = im.size
+
+    # infer full page size from max tile origin + tile size
+    tile_names = [p.name for p in tile_paths]
+    inferred_page_size = infer_page_size_from_tiles(tile_names, tile_w, tile_h)
+
+    predictor = ocr_predictor(
+        det_arch="db_resnet50",
+        reco_arch="crnn_vgg16_bn",
+        pretrained=True
+    )
 
     all_words = []
 
-    for img_path in sorted(tile_dir.glob("*.png")):
+    for img_path in tile_paths:
         m = TILE_RE.match(img_path.name)
         if not m:
             continue
@@ -104,25 +119,27 @@ def main():
 
         # doctr export structure: pages -> blocks -> lines -> words
         page = exported["pages"][0]
+
+        # exported includes "dimensions": (h, w) in pixels
+        th, tw = page["dimensions"]
+
         for block in page.get("blocks", []):
             for line in block.get("lines", []):
                 for w in line.get("words", []):
                     text = (w.get("value") or "").strip()
                     if not text:
                         continue
+
                     ((nx1, ny1), (nx2, ny2)) = w["geometry"]  # normalized to tile dims
-                    # convert to absolute page coords: tile origin + normalized*tile_size
-                    # we don't know tile dims here; use the word's own tile size from result dimensions
-                    # exported includes "dimensions": (h, w) in pixels
-                    th, tw = page["dimensions"]
                     ax1 = x0 + nx1 * tw
                     ay1 = y0 + ny1 * th
                     ax2 = x0 + nx2 * tw
                     ay2 = y0 + ny2 * th
+
                     all_words.append({
                         "text": text,
                         "bbox": [float(ax1), float(ay1), float(ax2), float(ay2)],
-                        "tile": img_path.name
+                        "tile": img_path.name,
                     })
 
     # dedupe by IoU + same text (keep first)
@@ -143,16 +160,17 @@ def main():
         "word_count_raw": len(all_words),
         "word_count_kept": len(kept),
         "words": ordered,
-        "tile_size": {"w": tw, "h": th},
-
+        "tile_size": {"w": tile_w, "h": tile_h},
+        "inferred_page_size": inferred_page_size,
     }
 
     out_json.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    out_txt.write_text("\n".join([w["text"] for w in ordered]) + "\n", encoding="utf-8")
+    out_txt.write_text("\n".join(w["text"] for w in ordered) + "\n", encoding="utf-8")
 
     print(f"Wrote: {out_json}")
     print(f"Wrote: {out_txt}")
     print(f"Words raw: {len(all_words)} | kept after dedupe: {len(kept)} | ordered: {len(ordered)}")
+
 
 if __name__ == "__main__":
     main()

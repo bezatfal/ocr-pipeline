@@ -29,3 +29,10 @@ node_modules/
 .next/
 dist/
 build/
+
+# Node
+node_modules/
+**/node_modules/
+.next/
+dist/
+build/

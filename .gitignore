@@ -22,3 +22,10 @@ __pycache__/
 .cache/doctr/
 .paddlex/
 hf-cache/
+
+# Node
+node_modules/
+**/node_modules/
+.next/
+dist/
+build/
